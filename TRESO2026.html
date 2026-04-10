@@ -140,7 +140,7 @@ button.sec:hover{background:#f5f7fb;}
       📂 Charger
       <input type="file" id="load-file" accept=".json" style="display:none;" onchange="loadData(this)">
     </label>
-    <span id="save-status" style="font-size: 10px; color: rgb(126, 34, 206); margin-right: 8px;">✓ Auto-sauvegardé 19:25</span>
+    <span id="save-status" style="font-size: 10px; color: rgb(126, 34, 206); margin-right: 8px;">✓ Auto-sauvegardé 19:34</span>
     <span id="alert-banner" style="font-size: 11px; font-weight: 700; color: rgb(185, 28, 28); background: rgb(254, 226, 226); padding: 3px 10px; border-radius: 20px;"><span id="alert-count">12</span> alertes</span>
   </div>
 </div>
@@ -1312,10 +1312,23 @@ function importFromGoogleSheets() {
       return r.text();
     })
     .then(function(text) {
+      // Parser CSV robuste qui gère les champs entre guillemets
+      function parseCSVLine(line) {
+        var result = [], cur = '', inQ = false;
+        for (var i = 0; i < line.length; i++) {
+          var c = line[i];
+          if (c === '"') { inQ = !inQ; }
+          else if (c === ',' && !inQ) { result.push(cur.trim()); cur = ''; }
+          else { cur += c; }
+        }
+        result.push(cur.trim());
+        return result;
+      }
+
       var lines = text.split('\n');
       if (lines.length < 2) throw new Error('Sheet vide ou format incorrect');
 
-      var headers = lines[0].replace(/\r/,'').split(',').map(function(h){ return h.replace(/"/g,'').trim(); });
+      var headers = parseCSVLine(lines[0].replace(/\r/,''));
       var iCompte  = headers.indexOf('Compte');
       var iIBAN    = headers.indexOf('IBAN');
       var iDate    = headers.indexOf('Date');
@@ -1327,12 +1340,14 @@ function importFromGoogleSheets() {
       for (var i = 1; i < lines.length; i++) {
         var line = lines[i].replace(/\r/,'').trim();
         if (!line) continue;
-        var p = line.split(',').map(function(v){ return v.replace(/"/g,'').trim(); });
+        var p = parseCSVLine(line);
         var compte = p[iCompte] || '';
         if (!compte || compte === 'Compte') { skipped++; continue; }
         var iban  = iIBAN >= 0  ? (p[iIBAN]  || '') : '';
         var date  = iDate >= 0  ? (p[iDate]  || '') : '';
-        var solde = parseFloat((p[iSoldeOp] || '0').replace(',','.')) || 0;
+        // Nettoyer le nombre : supprimer espaces, remplacer virgule décimale
+        var soldeStr = (p[iSoldeOp] || '0').replace(/\s/g,'').replace(/,/g,'.');
+        var solde = parseFloat(soldeStr) || 0;
 
         soldes[compte] = { s: solde, sc: solde, date: date.slice(0,10), iban: iban.replace(/\s/g,'') };
         if (iban) IBANS[compte] = iban.replace(/\s/g,'');
