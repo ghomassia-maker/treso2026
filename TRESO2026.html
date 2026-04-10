@@ -140,7 +140,7 @@ button.sec:hover{background:#f5f7fb;}
       📂 Charger
       <input type="file" id="load-file" accept=".json" style="display:none;" onchange="loadData(this)">
     </label>
-    <span id="save-status" style="font-size: 10px; color: rgb(126, 34, 206); margin-right: 8px;">✓ Auto-sauvegardé 19:05</span>
+    <span id="save-status" style="font-size: 10px; color: rgb(126, 34, 206); margin-right: 8px;">✓ Auto-sauvegardé 19:25</span>
     <span id="alert-banner" style="font-size: 11px; font-weight: 700; color: rgb(185, 28, 28); background: rgb(254, 226, 226); padding: 3px 10px; border-radius: 20px;"><span id="alert-count">12</span> alertes</span>
   </div>
 </div>
@@ -165,9 +165,11 @@ button.sec:hover{background:#f5f7fb;}
           📂 Choisir le fichier XLS
           <input type="file" id="nc-file-input" accept=".xls,.xlsx,.csv" style="display:none;" onchange="importFileNC(this)">
         </label>
+        <button onclick="importFromGoogleSheets()" style="background:#16a34a;color:#fff;font-size:11px;font-weight:700;padding:6px 14px;border-radius:6px;cursor:pointer;border:none;">🔄 Charger depuis Google Sheets</button>
         <span id="nc-filename" style="font-size:11px;color:#8892a8;">solde_compte (82).xls</span>
         <span id="nc-status" style="font-size:11px;color:#16a34a;margin-left:8px;">✓ 71 comptes importes (5 lignes ignorees)</span>
       </div>
+      <div id="gs-last-update" style="font-size:10px;color:#8892a8;margin-top:6px;"></div>
     </div>
   </div>
   <div class="card">
@@ -1291,6 +1293,67 @@ function renderNC(){
 }
 function updS(c,v){if(soldes[c])soldes[c].sc=parseFloat(v)||0;renderNC();}
 function updSByEl(el){var c=el.getAttribute('data-compte');var v=parseFloat(el.value)||0;if(soldes[c])soldes[c].sc=v;}
+// === IMPORT GOOGLE SHEETS NETCASH ===
+var SHEET_ID = '1U6uoh3erXKwbO_kMNi1wzMwMAac93GoVeu9yQjHJ0r0';
+var SHEET_NAME = 'Feuille 1';
+
+function importFromGoogleSheets() {
+  var statusEl = document.getElementById('nc-status');
+  var lastUpdateEl = document.getElementById('gs-last-update');
+  statusEl.textContent = '⏳ Chargement depuis Google Sheets...';
+  statusEl.style.color = '#d97706';
+
+  var url = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID
+    + '/export?format=csv&sheet=' + encodeURIComponent(SHEET_NAME);
+
+  fetch(url)
+    .then(function(r) {
+      if (!r.ok) throw new Error('Sheet inaccessible (vérifiez que le partage est activé)');
+      return r.text();
+    })
+    .then(function(text) {
+      var lines = text.split('\n');
+      if (lines.length < 2) throw new Error('Sheet vide ou format incorrect');
+
+      var headers = lines[0].replace(/\r/,'').split(',').map(function(h){ return h.replace(/"/g,'').trim(); });
+      var iCompte  = headers.indexOf('Compte');
+      var iIBAN    = headers.indexOf('IBAN');
+      var iDate    = headers.indexOf('Date');
+      var iSoldeOp = headers.indexOf('Solde_Op');
+
+      if (iCompte < 0 || iSoldeOp < 0) throw new Error('Colonnes Compte / Solde_Op introuvables — vérifiez les en-têtes du Sheet');
+
+      var n = 0, skipped = 0;
+      for (var i = 1; i < lines.length; i++) {
+        var line = lines[i].replace(/\r/,'').trim();
+        if (!line) continue;
+        var p = line.split(',').map(function(v){ return v.replace(/"/g,'').trim(); });
+        var compte = p[iCompte] || '';
+        if (!compte || compte === 'Compte') { skipped++; continue; }
+        var iban  = iIBAN >= 0  ? (p[iIBAN]  || '') : '';
+        var date  = iDate >= 0  ? (p[iDate]  || '') : '';
+        var solde = parseFloat((p[iSoldeOp] || '0').replace(',','.')) || 0;
+
+        soldes[compte] = { s: solde, sc: solde, date: date.slice(0,10), iban: iban.replace(/\s/g,'') };
+        if (iban) IBANS[compte] = iban.replace(/\s/g,'');
+        n++;
+      }
+
+      if (n === 0) throw new Error('Aucune donnée trouvée — vérifiez que le Sheet contient des lignes sous les en-têtes');
+
+      statusEl.textContent = '✓ ' + n + ' comptes chargés depuis Google Sheets (' + skipped + ' lignes ignorées)';
+      statusEl.style.color = '#16a34a';
+      document.getElementById('nc-filename').textContent = 'Google Sheets — Treso-NetCash';
+      if (lastUpdateEl) lastUpdateEl.textContent = 'Dernière synchronisation : ' + new Date().toLocaleString('fr-FR');
+      renderNC(); rDash();
+    })
+    .catch(function(err) {
+      statusEl.textContent = '❌ Erreur : ' + err.message;
+      statusEl.style.color = '#dc2626';
+      console.error('Erreur Google Sheets:', err);
+    });
+}
+
 function importFileNC(input){
   var file = input.files[0];
   if(!file) return;
